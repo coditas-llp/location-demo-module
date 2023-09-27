@@ -1,7 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:location/location.dart';
+import 'package:maps_poc/address_search.dart';
 import 'package:maps_poc/location_service.dart';
+import 'package:maps_poc/suggestion.dart';
+import 'package:uuid/uuid.dart';
 
 class GoogleMapsExample extends StatefulWidget {
   const GoogleMapsExample({super.key});
@@ -11,7 +17,7 @@ class GoogleMapsExample extends StatefulWidget {
 }
 
 class GoogleMapsExampleState extends State<GoogleMapsExample> {
-  // Completer<GoogleMapController> _controller = Completer();
+  Completer<GoogleMapController> _controller = Completer();
   final TextEditingController _originController = TextEditingController();
   final TextEditingController _destinationController = TextEditingController();
 
@@ -22,17 +28,47 @@ class GoogleMapsExampleState extends State<GoogleMapsExample> {
 
   int _polygonIdCounter = 1;
   int _polylineIdCounter = 1;
+  BitmapDescriptor sourceIcon = BitmapDescriptor.defaultMarker;
 
-  static const CameraPosition _kGooglePlex = CameraPosition(
-    target: LatLng(37.42796133580664, -122.085749655962),
-    zoom: 14.4746,
-  );
+  // static const CameraPosition _kGooglePlex = CameraPosition(
+  //   target: LatLng(37.42796133580664, -122.085749655962),
+  //   zoom: 14.4746,
+  // );
+  LocationData? currentLocation;
+
+  void getCurrentLocation() async {
+    Location location = Location();
+    location.getLocation().then(
+      (location) {
+        currentLocation = location;
+      },
+    );
+    GoogleMapController googleMapController = await _controller.future;
+    location.onLocationChanged.listen(
+      (newLoc) {
+        currentLocation = newLoc;
+        googleMapController.animateCamera(
+          CameraUpdate.newCameraPosition(
+            CameraPosition(
+              zoom: 13.5,
+              target: LatLng(
+                newLoc.latitude!,
+                newLoc.longitude!,
+              ),
+            ),
+          ),
+        );
+        _setMarker(LatLng(newLoc!.latitude!, newLoc.longitude!));
+        setState(() {});
+      },
+    );
+  }
 
   @override
   void initState() {
     super.initState();
-
-    _setMarker(const LatLng(37.42796133580664, -122.085749655962));
+    getCurrentLocation();
+    // _setMarker(const LatLng(37.42796133580664, -122.085749655962));
   }
 
   void _setMarker(LatLng point) {
@@ -60,6 +96,31 @@ class GoogleMapsExampleState extends State<GoogleMapsExample> {
     );
   }
 
+  void setCustomMarkerIcon() {
+    BitmapDescriptor.fromAssetImage(
+      ImageConfiguration.empty,
+      "assets/Pin_source.jpg",
+    ).then(
+      (icon) {
+        sourceIcon = icon;
+      },
+    );
+    // BitmapDescriptor.fromAssetImage(
+    //         ImageConfiguration.empty, "assets/Pin_destination.png")
+    //     .then(
+    //   (icon) {
+    //     destinationIcon = icon;
+    //   },
+    // );
+    // BitmapDescriptor.fromAssetImage(
+    //         ImageConfiguration.empty, "assets/Badge.png")
+    //     .then(
+    //   (icon) {
+    //     currentLocationIcon = icon;
+    //   },
+    // );
+  }
+
   void _setPolyline(List<PointLatLng> points) {
     final String polylineIdVal = 'polyline_$_polylineIdCounter';
     _polylineIdCounter++;
@@ -84,70 +145,111 @@ class GoogleMapsExampleState extends State<GoogleMapsExample> {
       appBar: AppBar(
         title: const Text('Google Maps'),
       ),
-      body: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  children: [
-                    TextFormField(
-                      controller: _originController,
-                      decoration: const InputDecoration(hintText: ' Origin'),
-                      onChanged: (value) {
-                        print(value);
-                      },
-                    ),
-                    TextFormField(
-                      controller: _destinationController,
-                      decoration:
-                          const InputDecoration(hintText: ' Destination'),
-                      onChanged: (value) {
-                        print(value);
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              IconButton(
-                onPressed: () async {
-                  var directions = await LocationService().getDirections(
-                    _originController.text,
-                    _destinationController.text,
-                  );
-                  _goToPlace(
-                    directions['start_location']['lat'],
-                    directions['start_location']['lng'],
-                    directions['bounds_ne'],
-                    directions['bounds_sw'],
-                  );
+      body: currentLocation == null
+          ? const Center(child: Text("Loading"))
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          children: [
+                            TextFormField(
+                              onTap: () async {
+                                // generate a new token here
+                                final sessionToken = Uuid().v4();
+                                final Suggestion? result = await showSearch(
+                                  context: context,
+                                  delegate: AddressSearch(sessionToken),
+                                );
+                                // This will change the text displayed in the TextField
+                                if (result != null) {
+                                  setState(() {
+                                    _originController.text = result.description;
+                                  });
+                                }
+                              },
+                              controller: _originController,
+                              decoration: InputDecoration(
+                                hintText: ' ORIGIN',
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                            ),
+                            TextFormField(
+                              onTap: () async {
+                                final sessionToken = Uuid().v4();
+                                final Suggestion? result = await showSearch(
+                                  context: context,
+                                  delegate: AddressSearch(sessionToken),
+                                );
+                                // This will change the text displayed in the TextField
+                                if (result != null) {
+                                  setState(() {
+                                    _destinationController.text =
+                                        result.description;
+                                  });
+                                }
+                              },
+                              controller: _destinationController,
+                              decoration: InputDecoration(
+                                hintText: 'DESTINATION',
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () async {
+                          var directions =
+                              await LocationService().getDirections(
+                            _originController.text,
+                            _destinationController.text,
+                          );
+                          _goToPlace(
+                            directions['start_location']['lat'],
+                            directions['start_location']['lng'],
+                            directions['bounds_ne'],
+                            directions['bounds_sw'],
+                          );
 
-                  _setPolyline(directions['polyline_decoded']);
-                },
-                icon: const Icon(Icons.search),
-              ),
-            ],
-          ),
-          Expanded(
-            child: GoogleMap(
-              mapType: MapType.normal,
-              markers: _markers,
-              polygons: _polygons,
-              polylines: _polylines,
-              initialCameraPosition: _kGooglePlex,
-              onMapCreated: (GoogleMapController controller) {
-                // _controller.complete(controller);
-              },
-              onTap: (point) {
-                setState(() {
-                  polygonLatLngs.add(point);
-                  _setPolygon();
-                });
-              },
+                          _setPolyline(directions['polyline_decoded']);
+                        },
+                        icon: const Icon(Icons.search),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: GoogleMap(
+                    mapType: MapType.normal,
+                    markers: _markers,
+                    polygons: _polygons,
+                    polylines: _polylines,
+                    initialCameraPosition: CameraPosition(
+                      target: LatLng(currentLocation!.latitude!,
+                          currentLocation!.longitude!),
+                      zoom: 13.5,
+                    ),
+                    onMapCreated: (GoogleMapController controller) {
+                      _controller.complete(controller);
+                    },
+                    onTap: (point) {
+                      setState(() {
+                        polygonLatLngs.add(point);
+                        _setPolygon();
+                      });
+                    },
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -161,21 +263,21 @@ class GoogleMapsExampleState extends State<GoogleMapsExample> {
     // final double lat = place['geometry']['location']['lat'];
     // final double lng = place['geometry']['location']['lng'];
 
-    // final GoogleMapController controller = await _controller.future;
-    // controller.animateCamera(
-    //   CameraUpdate.newCameraPosition(
-    //     CameraPosition(target: LatLng(lat, lng), zoom: 12),
-    //   ),
-    // );
+    final GoogleMapController controller = await _controller.future;
+    controller.animateCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(target: LatLng(lat, lng), zoom: 12),
+      ),
+    );
 
-    // controller.animateCamera(
-    //   CameraUpdate.newLatLngBounds(
-    //       LatLngBounds(
-    //         southwest: LatLng(boundsSw['lat'], boundsSw['lng']),
-    //         northeast: LatLng(boundsNe['lat'], boundsNe['lng']),
-    //       ),
-    //       25),
-    // );
+    controller.animateCamera(
+      CameraUpdate.newLatLngBounds(
+          LatLngBounds(
+            southwest: LatLng(boundsSw['lat'], boundsSw['lng']),
+            northeast: LatLng(boundsNe['lat'], boundsNe['lng']),
+          ),
+          25),
+    );
     _setMarker(LatLng(lat, lng));
   }
 }
